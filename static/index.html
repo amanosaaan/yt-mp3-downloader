@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube → MP3 ダウンローダー</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --accent: #ff4d4d;
+    --accent-dark: #d63c3c;
+    --text: #e8e8ec;
+    --muted: #9199a8;
+    --border: #2a2e38;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 40px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  h1 {
+    font-size: 22px;
+    margin: 0 0 8px;
+    text-align: center;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    margin-bottom: 28px;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #0f1115;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  button {
+    width: 100%;
+    margin-top: 14px;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover:not(:disabled) { background: var(--accent-dark); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status {
+    margin-top: 20px;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+    min-height: 18px;
+  }
+  .progress-wrap {
+    margin-top: 14px;
+    height: 8px;
+    border-radius: 4px;
+    background: #0f1115;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    display: none;
+  }
+  .progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.2s ease;
+  }
+  .error { color: #ff6b6b; }
+  .done { color: #4dd68a; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>YouTube → MP3</h1>
+    <div class="subtitle">YouTubeのリンクを貼り付けて音声(MP3)をダウンロード</div>
+
+    <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+    <button id="submit">MP3に変換</button>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+<script>
+const urlInput = document.getElementById('url');
+const submitBtn = document.getElementById('submit');
+const statusEl = document.getElementById('status');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar = document.getElementById('progressBar');
+
+let polling = null;
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = 'status' + (cls ? ' ' + cls : '');
+}
+
+function reset(enableButton) {
+  submitBtn.disabled = !enableButton;
+}
+
+async function startDownload() {
+  const url = urlInput.value.trim();
+  if (!url) {
+    setStatus('URLを入力してください', 'error');
+    return;
+  }
+
+  submitBtn.disabled = true;
+  progressWrap.style.display = 'block';
+  progressBar.style.width = '0%';
+  setStatus('準備中...');
+
+  let res, data;
+  try {
+    res = await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    data = await res.json();
+  } catch (e) {
+    setStatus('サーバーに接続できません', 'error');
+    reset(true);
+    return;
+  }
+
+  if (!res.ok) {
+    setStatus(data.error || 'エラーが発生しました', 'error');
+    reset(true);
+    return;
+  }
+
+  setStatus('ダウンロード中...');
+  poll(data.job_id);
+}
+
+function poll(jobId) {
+  if (polling) clearInterval(polling);
+  polling = setInterval(async () => {
+    let res, data;
+    try {
+      res = await fetch('/api/status/' + jobId);
+      data = await res.json();
+    } catch (e) {
+      return;
+    }
+
+    if (!res.ok) {
+      clearInterval(polling);
+      setStatus(data.error || 'エラーが発生しました', 'error');
+      reset(true);
+      return;
+    }
+
+    progressBar.style.width = Math.round(data.progress) + '%';
+
+    if (data.status === 'downloading') {
+      setStatus('ダウンロード中... ' + Math.round(data.progress) + '%');
+    } else if (data.status === 'done') {
+      clearInterval(polling);
+      setStatus('完了！ダウンロードを開始します', 'done');
+      window.location.href = '/api/file/' + jobId;
+      reset(true);
+    } else if (data.status === 'error') {
+      clearInterval(polling);
+      setStatus(data.error || '変換に失敗しました', 'error');
+      reset(true);
+    }
+  }, 800);
+}
+
+submitBtn.addEventListener('click', startDownload);
+urlInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') startDownload();
+});
+</script>
+</body>
+</html>
