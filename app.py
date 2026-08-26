@@ -52,10 +52,11 @@ def run_download(job_id: str, url: str):
         ],
         "progress_hooks": [progress_hook],
         "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
         "js_runtimes": {"node": {}},
         "remote_components": ["ejs:github"],
+        "verbose": True,
+        "quiet": False,
+        "no_warnings": False,
     }
 
     try:
