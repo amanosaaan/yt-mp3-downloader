@@ -54,6 +54,8 @@ def run_download(job_id: str, url: str):
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "js_runtimes": {"node": {}},
+        "remote_components": ["ejs:github"],
     }
 
     try:
