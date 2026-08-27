@@ -26,7 +26,13 @@ def sanitize_filename(name: str) -> str:
     return name.strip()[:150] or "audio"
 
 
-def run_download(job_id: str, url: str):
+MIME_TYPES = {
+    "mp3": "audio/mpeg",
+    "mp4": "video/mp4",
+}
+
+
+def run_download(job_id: str, url: str, fmt: str):
     def progress_hook(d):
         with jobs_lock:
             job = jobs.get(job_id)
@@ -41,15 +47,7 @@ def run_download(job_id: str, url: str):
 
     out_template = os.path.join(DOWNLOAD_DIR, f"{job_id}.%(ext)s")
     ydl_opts = {
-        "format": "bestaudio/best",
         "outtmpl": out_template,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }
-        ],
         "progress_hooks": [progress_hook],
         "noplaylist": True,
         "js_runtimes": {"node": {}},
@@ -58,20 +56,33 @@ def run_download(job_id: str, url: str):
         "no_warnings": True,
     }
 
+    if fmt == "mp4":
+        ydl_opts["format"] = "bestvideo*+bestaudio/best"
+        ydl_opts["merge_output_format"] = "mp4"
+    else:
+        ydl_opts["format"] = "bestaudio/best"
+        ydl_opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ]
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            title = sanitize_filename(info.get("title", "audio"))
+            title = sanitize_filename(info.get("title", "video"))
 
-        mp3_path = os.path.join(DOWNLOAD_DIR, f"{job_id}.mp3")
-        if not os.path.exists(mp3_path):
-            raise RuntimeError("MP3への変換に失敗しました")
+        out_path = os.path.join(DOWNLOAD_DIR, f"{job_id}.{fmt}")
+        if not os.path.exists(out_path):
+            raise RuntimeError(f"{fmt.upper()}への変換に失敗しました")
 
         with jobs_lock:
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100
-            jobs[job_id]["filename"] = f"{title}.mp3"
-            jobs[job_id]["path"] = mp3_path
+            jobs[job_id]["filename"] = f"{title}.{fmt}"
+            jobs[job_id]["path"] = out_path
     except Exception as e:
         with jobs_lock:
             jobs[job_id]["status"] = "error"
@@ -87,15 +98,19 @@ def index():
 def start():
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
+    fmt = (data.get("format") or "mp3").strip().lower()
 
     if not url or not YOUTUBE_URL_RE.match(url):
         return jsonify({"error": "有効なYouTubeのURLを入力してください"}), 400
+
+    if fmt not in ("mp3", "mp4"):
+        return jsonify({"error": "形式はmp3かmp4を指定してください"}), 400
 
     job_id = uuid.uuid4().hex
     with jobs_lock:
         jobs[job_id] = {"status": "downloading", "progress": 0, "filename": None, "error": None}
 
-    thread = threading.Thread(target=run_download, args=(job_id, url), daemon=True)
+    thread = threading.Thread(target=run_download, args=(job_id, url, fmt), daemon=True)
     thread.start()
 
     return jsonify({"job_id": job_id})
@@ -126,7 +141,9 @@ def get_file(job_id):
         path = job["path"]
         filename = job["filename"]
 
-    return send_file(path, as_attachment=True, download_name=filename, mimetype="audio/mpeg")
+    ext = filename.rsplit(".", 1)[-1].lower()
+    mimetype = MIME_TYPES.get(ext, "application/octet-stream")
+    return send_file(path, as_attachment=True, download_name=filename, mimetype=mimetype)
 
 
 if __name__ == "__main__":
