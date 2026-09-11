@@ -19,3 +19,8 @@ python app.py
 ```
 
 ブラウザで `http://127.0.0.1:5000` を開き、YouTubeのURLを入力して「MP3に変換」を押してください。
+
+## UR賃貸空室通知(おまけ)
+
+`ur_vacancy_notifier/` に、UR賃貸住宅の空室状況を定期チェックしてメール通知する
+独立したスクリプトを同梱しています。詳細は `ur_vacancy_notifier/README.md` を参照してください。

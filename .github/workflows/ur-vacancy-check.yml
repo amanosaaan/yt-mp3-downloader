@@ -1,0 +1,46 @@
+name: UR Vacancy Check
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ur-vacancy-check
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r ur_vacancy_notifier/requirements.txt
+
+      - name: Run vacancy check
+        env:
+          WATCH_URLS: ${{ vars.WATCH_URLS }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python ur_vacancy_notifier/notifier.py --once
+
+      - name: Commit updated state
+        run: |
+          if ! git diff --quiet -- ur_vacancy_notifier/state.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add ur_vacancy_notifier/state.json
+            git commit -m "chore: update UR vacancy state"
+            git push
+          fi
